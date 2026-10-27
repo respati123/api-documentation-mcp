@@ -19,6 +19,17 @@
     "api-documentation"
   ],
   "scripts": {
-    "build": "node ../../scripts/build-mcp-package.mjs"
+    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\" --log-level=warning && node -e \"require('fs').chmodSync('dist/index.js', 0o755)\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3"
   }
 }

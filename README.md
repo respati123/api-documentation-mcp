@@ -4,14 +4,12 @@ Local MCP server for the API Documentation desktop app. It reads the same local 
 
 ## Use with an AI client
 
-Add this to your MCP client configuration:
-
 ```json
 {
   "mcpServers": {
     "api-documentation": {
       "command": "npx",
-      "args": ["-y", "api-documentation-mcp"]
+      "args": ["-y", "api-documentation-mcp@latest"]
     }
   }
 }
@@ -20,14 +18,12 @@ Add this to your MCP client configuration:
 For Codex:
 
 ```
-codex mcp add api-documentation -- npx -y api-documentation-mcp
+codex mcp add api-documentation -- npx -y api-documentation-mcp@latest
 ```
 
 Requires Node.js 22 or newer.
 
 ## Data location
-
-The server uses the same data folder as the desktop app:
 
 - Linux: `~/.config/api-documentation-bit`
 - macOS: `~/Library/Application Support/api-documentation-bit`
@@ -44,4 +40,12 @@ Set `API_DOCS_USER_DATA_DIR` in the client configuration if the app uses a custo
 - `preview_changes`
 - `apply_changes`
 
-`apply_changes` writes local drafts. Keep the desktop app open to see changes immediately. Changes are shared only after they are committed and pushed from the desktop app.
+`apply_changes` writes local drafts. Keep the desktop app open to see changes immediately.
+
+## Development
+
+```
+npm ci
+npm run typecheck
+npm run build
+```
