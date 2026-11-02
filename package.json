@@ -1,10 +1,11 @@
 {
   "name": "api-documentation-mcp",
-  "version": "0.1.1",
-  "description": "Local MCP server for API Documentation desktop app workspaces, collections, and requests",
+  "version": "0.2.0",
+  "description": "Command-line and MCP access to the API Documentation desktop app: workspaces, collections, requests, environments, variables, and sending requests",
   "type": "module",
   "bin": {
-    "api-documentation-mcp": "dist/index.js"
+    "api-documentation-mcp": "dist/index.js",
+    "api-documentation": "dist/index.js"
   },
   "files": [
     "dist/index.js",
@@ -16,12 +17,14 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "api-documentation"
+    "api-documentation",
+    "cli"
   ],
   "scripts": {
-    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\" --log-level=warning && node -e \"require('fs').chmodSync('dist/index.js', 0o755)\"",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\" --log-level=warning && node -e \"require('fs').chmodSync('dist/index.js', 0o755)\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test": "esbuild src/test/commands.test.ts --bundle --platform=node --format=esm --target=node22 --outfile=.test-out/commands.test.mjs --log-level=warning && node --test .test-out/commands.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
