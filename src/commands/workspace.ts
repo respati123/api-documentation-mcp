@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { defineCommand } from '../registry.js'
-import { activeAccountId, deleteWorkspace, insertWorkspace, listWorkspaces, readWorkspace, updateWorkspace } from '../store.js'
+import { deleteWorkspace, insertWorkspace, listWorkspaces, readWorkspace, updateWorkspace } from '../store.js'
 import { safeTree } from '../redact.js'
 import type { StoredWorkspace } from '../types.js'
 
@@ -37,7 +37,6 @@ export const workspaceCommands = [
         activeEnvironmentId: null,
         baseCommitId: null,
         localHeadId: null,
-        accountId: activeAccountId(),
       }
       insertWorkspace(workspace)
       return { id: workspace.id, name: workspace.name }

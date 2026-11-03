@@ -65,9 +65,11 @@ export function activeAccountId(): string | null {
   }
 }
 
-// A workspace with no owner was saved before accounts existed, so every account can see it.
+// Local workspaces belong to the device, so every account sees them. A cloud copy belongs to the account that owns it.
+// A cloud copy with no owner predates accounts, and is visible to everyone until an account claims it.
 function visibleTo(workspace: StoredWorkspace, accountId: string | null): boolean {
-  return !accountId || !workspace.accountId || workspace.accountId === accountId
+  if (!workspace.cloudId || !accountId) return true
+  return !workspace.accountId || workspace.accountId === accountId
 }
 
 export function listWorkspaces(): Array<{ id: string; name: string; cloudId: string | null; role: StoredWorkspace['role'] }> {

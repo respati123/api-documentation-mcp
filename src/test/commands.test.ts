@@ -402,17 +402,21 @@ describe('accounts and cloud copies', () => {
 
   after(() => setActiveAccount(null))
 
-  it('gives a new local workspace the active account', async () => {
+  it('a new local workspace belongs to the device, not to an account', async () => {
     setActiveAccount('account-a')
-    const created = (await run('workspace.create', { name: 'Owned by A' })) as { id: string }
-    assert.equal(readWorkspace(created.id).workspace.accountId, 'account-a')
+    const created = (await run('workspace.create', { name: 'Device vault item' })) as { id: string }
+    assert.equal(readWorkspace(created.id).workspace.accountId ?? null, null)
+    setActiveAccount('account-b')
+    assert.ok(((await run('workspace.list', {})) as Array<{ id: string }>).some((item) => item.id === created.id))
   })
 
-  it('lists and reads only the active account’s workspaces', async () => {
+  it('lists and reads only the active account’s cloud copies', async () => {
     setActiveAccount('account-a')
     const mine = (await run('workspace.create', { name: 'Mine' })) as { id: string }
+    updateWorkspace(mine.id, (workspace) => ({ ...workspace, cloudId: 'cloud-mine', accountId: 'account-a' }))
     setActiveAccount('account-b')
     const theirs = (await run('workspace.create', { name: 'Theirs' })) as { id: string }
+    updateWorkspace(theirs.id, (workspace) => ({ ...workspace, cloudId: 'cloud-theirs', accountId: 'account-b' }))
 
     const listed = (await run('workspace.list', {})) as Array<{ id: string }>
     assert.ok(listed.some((item) => item.id === theirs.id))
@@ -427,9 +431,9 @@ describe('accounts and cloud copies', () => {
     await assert.rejects(run('folder.create', { workspaceId: created.id, parentId: null, name: 'Nope' }), /desktop app/)
   })
 
-  it('keeps the owning account when a collection changes', async () => {
-    setActiveAccount('account-a')
+  it('keeps an existing accountId when a collection changes', async () => {
     const created = (await run('workspace.create', { name: 'Edited' })) as { id: string }
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, accountId: 'account-a' }))
     await run('folder.create', { workspaceId: created.id, parentId: null, name: 'Folder' })
     assert.equal(readWorkspace(created.id).workspace.accountId, 'account-a')
   })
