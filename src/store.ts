@@ -39,24 +39,45 @@ export function hashRaw(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
+// The account the desktop app is signed in to, written by the app to app_settings. Null when nobody is signed in, or the app predates accounts.
+export const activeAccountKey = 'active-account'
+
+export function activeAccountId(): string | null {
+  try {
+    const row = database().prepare('SELECT value FROM app_settings WHERE key = ?').get(activeAccountKey) as { value: string } | undefined
+    return row?.value ?? null
+  } catch (error) {
+    if (error instanceof Error && /no such table/.test(error.message)) return null
+    throw error
+  }
+}
+
+// A workspace with no owner was saved before accounts existed, so every account can see it.
+function visibleTo(workspace: StoredWorkspace, accountId: string | null): boolean {
+  return !accountId || !workspace.accountId || workspace.accountId === accountId
+}
+
 export function listWorkspaces(): Array<{ id: string; name: string; cloudId: string | null; role: StoredWorkspace['role'] }> {
+  const accountId = activeAccountId()
   const rows = database().prepare('SELECT data FROM workspaces ORDER BY rowid').all() as { data: string }[]
-  return rows.map(({ data }) => {
-    const workspace = JSON.parse(data) as StoredWorkspace
-    return { id: workspace.id, name: workspace.name, cloudId: workspace.cloudId ?? null, role: workspace.role ?? null }
-  })
+  return rows
+    .map(({ data }) => JSON.parse(data) as StoredWorkspace)
+    .filter((workspace) => visibleTo(workspace, accountId))
+    .map((workspace) => ({ id: workspace.id, name: workspace.name, cloudId: workspace.cloudId ?? null, role: workspace.role ?? null }))
 }
 
 export function readWorkspace(workspaceId: string): { raw: string; workspace: StoredWorkspace } {
   const row = database().prepare('SELECT data FROM workspaces WHERE id = ?').get(workspaceId) as { data: string } | undefined
   if (!row) throw new Error(`Workspace "${workspaceId}" was not found.`)
   const workspace = JSON.parse(row.data) as StoredWorkspace
+  if (!visibleTo(workspace, activeAccountId())) throw new Error(`Workspace "${workspaceId}" was not found.`)
   if (!Array.isArray(workspace.tree)) throw new Error('Workspace collection data is invalid.')
   return { raw: row.data, workspace }
 }
 
 export function assertCanEdit(workspace: StoredWorkspace): void {
   if (workspace.role === 'viewer') throw new Error('This workspace is read-only for the current account.')
+  if (workspace.cloudId) throw new Error('Cloud copies are edited in the desktop app, then pushed to the cloud from there.')
 }
 
 // Reads, changes, and writes one workspace in a single immediate transaction, so two commands cannot interleave.

@@ -268,3 +268,51 @@ describe('persistence', () => {
     writeFileSync(join(dataDir, 'ok.txt'), 'ok')
   })
 })
+
+describe('accounts and cloud copies', () => {
+  // The desktop app writes the signed-in account id to app_settings. The CLI reads it from there.
+  const setActiveAccount = (userId: string | null) => {
+    const connection = new DatabaseSync(join(dataDir, 'workspace.sqlite'))
+    connection.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    if (userId === null) connection.exec("DELETE FROM app_settings WHERE key = 'active-account'")
+    else
+      connection
+        .prepare("INSERT INTO app_settings (key, value) VALUES ('active-account', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(userId)
+    connection.close()
+  }
+
+  after(() => setActiveAccount(null))
+
+  it('gives a new local workspace the active account', async () => {
+    setActiveAccount('account-a')
+    const created = (await run('workspace.create', { name: 'Owned by A' })) as { id: string }
+    assert.equal(readWorkspace(created.id).workspace.accountId, 'account-a')
+  })
+
+  it('lists and reads only the active account’s workspaces', async () => {
+    setActiveAccount('account-a')
+    const mine = (await run('workspace.create', { name: 'Mine' })) as { id: string }
+    setActiveAccount('account-b')
+    const theirs = (await run('workspace.create', { name: 'Theirs' })) as { id: string }
+
+    const listed = (await run('workspace.list', {})) as Array<{ id: string }>
+    assert.ok(listed.some((item) => item.id === theirs.id))
+    assert.ok(!listed.some((item) => item.id === mine.id))
+    assert.throws(() => readWorkspace(mine.id), /was not found/)
+  })
+
+  it('refuses edits to a cloud copy, which are made in the desktop app and pushed from there', async () => {
+    setActiveAccount(null)
+    const created = (await run('workspace.create', { name: 'Cloud copy' })) as { id: string }
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-1' }))
+    await assert.rejects(run('folder.create', { workspaceId: created.id, parentId: null, name: 'Nope' }), /desktop app/)
+  })
+
+  it('keeps the owning account when a collection changes', async () => {
+    setActiveAccount('account-a')
+    const created = (await run('workspace.create', { name: 'Edited' })) as { id: string }
+    await run('folder.create', { workspaceId: created.id, parentId: null, name: 'Folder' })
+    assert.equal(readWorkspace(created.id).workspace.accountId, 'account-a')
+  })
+})
