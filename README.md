@@ -61,7 +61,9 @@ Set `API_DOCS_USER_DATA_DIR` if the app uses a custom data folder.
 
 Destructive commands (`*.delete`) require `"confirm": true`. Only set it after the user confirms.
 
-Collection edits can also go through `changes.preview` and then `changes.apply`. Apply refuses a preview when the workspace changed after it, so nothing newer is overwritten.
+Collection edits go through `changes.preview` and then `changes.apply`. Apply refuses a preview when the workspace changed after it, so nothing newer is overwritten.
+
+MCP clients do not get the direct collection writes (`folder.*`, `node.move`, `request.create`, `request.update`, `request.duplicate`, `request.deprecate`, `request.delete`). They stay in the CLI for scripts. Sending a request from an MCP client needs `dryRun: true` first, then `confirmUrl` set to the URL it showed.
 
 ## Limits and safety
 

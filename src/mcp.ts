@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { allCommands, executeCommand } from './commands/index.js'
 import { describeCommand } from './registry.js'
+import { mcpCommands, missingTargetConfirmation } from './mcp-surface.js'
 
 // Tool names cannot contain dots in every MCP client, so "request.send" is exposed as "request_send".
 const toolName = (commandId: string) => commandId.replace(/\./g, '_')
@@ -33,11 +34,15 @@ export async function startMcpServer(): Promise<void> {
         inputSchema: command.params.shape,
         annotations: { readOnlyHint: command.readOnly, destructiveHint: command.destructive, openWorldHint: command.id === 'request.send' },
       },
-      async (params: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(await executeCommand(commandId, params), null, 2) }] }),
+      async (params: unknown) => {
+        const refusal = missingTargetConfirmation(commandId, (params ?? {}) as Record<string, unknown>)
+        if (refusal) throw new Error(refusal)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(await executeCommand(commandId, params), null, 2) }] }
+      },
     )
   }
 
-  for (const command of allCommands) {
+  for (const command of mcpCommands()) {
     register(toolName(command.id), command.id, command.title, command.description)
   }
   for (const [name, commandId] of Object.entries(legacyTools)) {
@@ -51,7 +56,7 @@ export async function startMcpServer(): Promise<void> {
       description: 'List every desktop app command with its parameters and whether it is read-only or destructive.',
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async () => ({ content: [{ type: 'text' as const, text: JSON.stringify(allCommands.map(describeCommand), null, 2) }] }),
+    async () => ({ content: [{ type: 'text' as const, text: JSON.stringify(mcpCommands().map(describeCommand), null, 2) }] }),
   )
 
   await server.connect(new StdioServerTransport())

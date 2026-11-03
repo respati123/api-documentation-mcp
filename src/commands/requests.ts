@@ -126,11 +126,17 @@ export const requestCommands = [
     title: 'Send request',
     description:
       'Send a request over HTTP and return status, headers, and body. {{variables}} are filled from the active or given environment and globals. Secret variables must be set in the desktop app first.',
-    params: z.object({ workspaceId, requestId, environmentId: z.string().min(1).nullable().optional().describe('Environment id; defaults to the active one, or null for none') }),
+    params: z.object({
+      workspaceId,
+      requestId,
+      environmentId: z.string().min(1).nullable().optional().describe('Environment id; defaults to the active one, or null for none'),
+      dryRun: z.boolean().optional().describe('Return the URL the request would call, without sending it'),
+      confirmUrl: z.string().min(1).optional().describe('Send only if the request still goes to this URL, as shown by a dry run'),
+    }),
     readOnly: false,
-    run: async ({ workspaceId: id, requestId: request, environmentId }) => {
+    run: async ({ workspaceId: id, requestId: request, environmentId, dryRun, confirmUrl }) => {
       const { workspace } = readWorkspace(id)
-      return sendRequest(findRequest(workspace.tree, request), workspace, environmentId ?? null)
+      return sendRequest(findRequest(workspace.tree, request), workspace, environmentId ?? null, { dryRun, confirmUrl })
     },
   }),
 ]

@@ -7,6 +7,7 @@ import { after, before, describe, it } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { allCommands, executeCommand } from '../commands/index.js'
 import { describeParams } from '../registry.js'
+import { mcpCommands, missingTargetConfirmation } from '../mcp-surface.js'
 import { readWorkspace, updateWorkspace } from '../store.js'
 
 // Each run gets its own data folder with the same schema the desktop app creates.
@@ -49,6 +50,22 @@ before(async () => {
 after(() => {
   echo.close()
   rmSync(dataDir, { recursive: true, force: true })
+})
+
+describe('MCP surface', () => {
+  it('exposes collection changes only through changes.preview and changes.apply', () => {
+    const ids = mcpCommands().map((command) => command.id)
+    for (const direct of ['folder.create', 'folder.rename', 'folder.delete', 'node.move', 'request.create', 'request.update', 'request.duplicate', 'request.deprecate', 'request.delete']) {
+      assert.ok(!ids.includes(direct), `${direct} should not be exposed to MCP clients`)
+    }
+    assert.ok(ids.includes('changes.preview'))
+    assert.ok(ids.includes('changes.apply'))
+    assert.ok(ids.includes('request.send'))
+  })
+
+  it('still lists those writes in the CLI registry', () => {
+    assert.ok(allCommands.some((command) => command.id === 'request.create'))
+  })
 })
 
 describe('command registry', () => {
@@ -266,6 +283,44 @@ describe('persistence', () => {
     assert.ok(Array.isArray(workspace.tree))
     assert.ok(workspace.variables && Array.isArray(workspace.variables.environments))
     writeFileSync(join(dataDir, 'ok.txt'), 'ok')
+  })
+})
+
+describe('request.send target confirmation', () => {
+  it('dry run returns the URL it would call without sending', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Dry', method: 'GET', url: '{{baseUrl}}/dry' } })) as { id: string }
+    const result = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true })) as { dryRun: boolean; method: string; url: string }
+    assert.equal(result.dryRun, true)
+    assert.equal(result.method, 'GET')
+    assert.match(result.url, /\/dry$/)
+  })
+
+  it('refuses to send when the URL differs from the one confirmed', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Moved', method: 'GET', url: '{{baseUrl}}/moved' } })) as { id: string }
+    await assert.rejects(
+      run('request.send', { workspaceId, requestId: request.id, environmentId: staging, confirmUrl: 'http://elsewhere.test/moved' }),
+      /target changed/,
+    )
+  })
+
+  it('sends when the confirmed URL matches', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Confirmed', method: 'GET', url: '{{baseUrl}}/ping' } })) as { id: string }
+    const dry = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true })) as { url: string }
+    const sent = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, confirmUrl: dry.url })) as { status: number }
+    assert.equal(sent.status, 201)
+  })
+
+  it('the MCP surface requires a dry run or a confirmed URL before a send', () => {
+    assert.match(missingTargetConfirmation('request.send', {}) ?? '', /dryRun/)
+    assert.equal(missingTargetConfirmation('request.send', { dryRun: true }), null)
+    assert.equal(missingTargetConfirmation('request.send', { confirmUrl: 'http://x.test' }), null)
+    assert.equal(missingTargetConfirmation('request.get', {}), null)
   })
 })
 

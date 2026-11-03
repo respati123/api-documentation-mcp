@@ -45,7 +45,14 @@ const defaultMime: Record<string, string> = {
   other: 'text/plain',
 }
 
-export async function sendRequest(request: SyncRequest, workspace: StoredWorkspace, environmentId: string | null) {
+export type SendOptions = {
+  // Return the URL the request would call, without sending it.
+  dryRun?: boolean
+  // Send only when the URL this request goes to is exactly this one, as shown by a dry run.
+  confirmUrl?: string
+}
+
+export async function sendRequest(request: SyncRequest, workspace: StoredWorkspace, environmentId: string | null, options: SendOptions = {}) {
   const { values, blocked } = resolveVariables(workspace, environmentId)
   const missing = new Set<string>()
   const f = (text: string) => fill(text, values, missing)
@@ -90,6 +97,11 @@ export async function sendRequest(request: SyncRequest, workspace: StoredWorkspa
   }
 
   const method = request.method.toUpperCase()
+  const target = sanitizeUrl(url.toString())
+  if (options.dryRun) return { dryRun: true as const, method, url: target }
+  if (options.confirmUrl !== undefined && options.confirmUrl !== target) {
+    throw new Error(`The target changed. This request now goes to ${target}. Confirm that URL with a dry run before sending.`)
+  }
   const started = Date.now()
   const response = await fetch(url, {
     method,
