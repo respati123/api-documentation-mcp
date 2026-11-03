@@ -7,7 +7,7 @@ import { after, before, describe, it } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { allCommands, executeCommand } from '../commands/index.js'
 import { describeParams } from '../registry.js'
-import { mcpCommands, missingTargetConfirmation } from '../mcp-surface.js'
+import { mcpCommands, missingTargetConfirmation, missingVariableRevision } from '../mcp-surface.js'
 import { readWorkspace, updateWorkspace } from '../store.js'
 
 // Each run gets its own data folder with the same schema the desktop app creates.
@@ -321,6 +321,69 @@ describe('request.send target confirmation', () => {
     assert.equal(missingTargetConfirmation('request.send', { dryRun: true }), null)
     assert.equal(missingTargetConfirmation('request.send', { confirmUrl: 'http://x.test' }), null)
     assert.equal(missingTargetConfirmation('request.get', {}), null)
+  })
+})
+
+describe('variables and revisions', () => {
+  // Writes the stored secret the way the desktop app does, so a secret change can be seen without reading its value.
+  const storeSecret = (workspaceId: string, variableId: string, sealed: string) => {
+    const connection = new DatabaseSync(join(dataDir, 'workspace.sqlite'))
+    connection
+      .prepare('INSERT INTO secrets (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(`workspace-variable:${workspaceId}:${variableId}`, Buffer.from(sealed))
+    connection.close()
+  }
+
+  it('variable.get returns a value with its revision, and never a secret value', async () => {
+    const ws = (await run('workspace.create', { name: 'Vars' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'baseUrl', value: 'https://a.test', expectedRevision: null })
+    const got = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'baseUrl' })) as { value: string; revision: string | null; exists: boolean }
+    assert.equal(got.exists, true)
+    assert.equal(got.value, 'https://a.test')
+    assert.ok(got.revision)
+
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'token', secret: true, expectedRevision: null })
+    const secret = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'token' })) as { value: string; secret: boolean }
+    assert.equal(secret.secret, true)
+    assert.equal(secret.value, '<secret>')
+  })
+
+  it('refuses an update based on a revision that is out of date', async () => {
+    const ws = (await run('workspace.create', { name: 'Stale' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'host', value: 'one', expectedRevision: null })
+    const first = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'host' })) as { revision: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'host', value: 'two', expectedRevision: first.revision })
+
+    await assert.rejects(
+      run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'host', value: 'three', expectedRevision: first.revision }),
+      /changed since you read it/,
+    )
+    assert.equal((await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'host' }) as { value: string }).value, 'two')
+  })
+
+  it('refuses to create a variable that already exists', async () => {
+    const ws = (await run('workspace.create', { name: 'Exists' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'region', value: 'eu', expectedRevision: null })
+    await assert.rejects(run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'region', value: 'us', expectedRevision: null }), /already exists/)
+  })
+
+  it('sees a secret that the app set again, so a stale delete is refused', async () => {
+    const ws = (await run('workspace.create', { name: 'Secrets' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'apiKey', secret: true, expectedRevision: null })
+    const before = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'apiKey' })) as { id: string; revision: string }
+
+    storeSecret(ws.id, before.id, 'sealed-value-1')
+    const after = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'apiKey' })) as { revision: string }
+    assert.notEqual(after.revision, before.revision)
+
+    await assert.rejects(run('variable.delete', { workspaceId: ws.id, scope: 'global', name: 'apiKey', confirm: true, expectedRevision: before.revision }), /changed since you read it/)
+  })
+
+  it('the MCP surface requires a revision for variable writes, and not for reads', () => {
+    assert.match(missingVariableRevision('variable.set', { name: 'x' }) ?? '', /variable.get/)
+    assert.match(missingVariableRevision('variable.delete', {}) ?? '', /variable.get/)
+    assert.equal(missingVariableRevision('variable.set', { expectedRevision: null }), null)
+    assert.equal(missingVariableRevision('variable.get', {}), null)
   })
 })
 

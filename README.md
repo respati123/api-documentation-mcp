@@ -69,6 +69,7 @@ MCP clients do not get the direct collection writes (`folder.*`, `node.move`, `r
 
 - Secret values are never returned. `environment.list` shows them as `<secret>`. Request params, headers, body, auth, responses, and docs all go through `request.create` and `request.update`. Literal tokens in a request are shown as `<redacted>`, but `{{variable}}` references are shown as written, so an agent can see that auth uses `{{accessToken}}`.
 - A secret variable is created empty when `variable.set` gets `"secret": true` with no value. Its value is entered in the desktop app. An existing secret cannot be changed from the CLI.
+- Variable writes are checked against what was read. `variable.get` returns a `revision`. `variable.set` and `variable.delete` take `expectedRevision` and refuse the write if the variable changed since then. The revision of a secret covers its stored form, so a secret the app sets again also counts as a change. MCP clients must pass `expectedRevision`, using `null` for a variable that does not exist yet.
 - Cloud workspaces are read from the CLI but not created, renamed, or deleted from it. Cloud copies also refuse edits: change them in the desktop app and push from there, so nothing is left unpushed.
 - Viewer workspaces refuse writes.
 - Accounts: the desktop app writes the signed-in account id to `app_settings`. Workspaces the CLI creates get that account, and the CLI shows and edits only the active account's workspaces plus workspaces that predate accounts. With no account signed in, every workspace is visible.

@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { allCommands, executeCommand } from './commands/index.js'
 import { describeCommand } from './registry.js'
-import { mcpCommands, missingTargetConfirmation } from './mcp-surface.js'
+import { mcpCommands, missingTargetConfirmation, missingVariableRevision } from './mcp-surface.js'
 
 // Tool names cannot contain dots in every MCP client, so "request.send" is exposed as "request_send".
 const toolName = (commandId: string) => commandId.replace(/\./g, '_')
@@ -35,7 +35,8 @@ export async function startMcpServer(): Promise<void> {
         annotations: { readOnlyHint: command.readOnly, destructiveHint: command.destructive, openWorldHint: command.id === 'request.send' },
       },
       async (params: unknown) => {
-        const refusal = missingTargetConfirmation(commandId, (params ?? {}) as Record<string, unknown>)
+        const input = (params ?? {}) as Record<string, unknown>
+        const refusal = missingTargetConfirmation(commandId, input) ?? missingVariableRevision(commandId, input)
         if (refusal) throw new Error(refusal)
         return { content: [{ type: 'text' as const, text: JSON.stringify(await executeCommand(commandId, params), null, 2) }] }
       },

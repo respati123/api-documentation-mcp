@@ -39,6 +39,19 @@ export function hashRaw(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
+// A fingerprint of a variable's stored secret. The value is encrypted and is never read here. The fingerprint changes when the app sets the secret again.
+export function secretFingerprint(workspaceId: string, variableId: string): string {
+  try {
+    const row = database().prepare('SELECT value FROM secrets WHERE key = ?').get(`workspace-variable:${workspaceId}:${variableId}`) as
+      | { value: Uint8Array }
+      | undefined
+    return row ? createHash('sha256').update(row.value).digest('hex') : ''
+  } catch (error) {
+    if (error instanceof Error && /no such table/.test(error.message)) return ''
+    throw error
+  }
+}
+
 // The account the desktop app is signed in to, written by the app to app_settings. Null when nobody is signed in, or the app predates accounts.
 export const activeAccountKey = 'active-account'
 

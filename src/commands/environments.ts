@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { defineCommand } from '../registry.js'
-import { readWorkspace, updateWorkspace } from '../store.js'
+import { hashRaw, readWorkspace, secretFingerprint, updateWorkspace } from '../store.js'
 import { variableNameSchema, variableValueSchema } from '../schemas.js'
 import type { StoredWorkspace, WorkspaceEnvironment, WorkspaceVariable, WorkspaceVariables } from '../types.js'
 
@@ -30,6 +30,25 @@ function findEnvironment(variables: WorkspaceVariables, id: string): WorkspaceEn
 }
 
 const scopeSchema = z.enum(['global', 'environment']).describe('global for workspace-wide values, environment for one environment')
+
+// The variables a scope holds. An environment scope needs its id.
+function rowsFor(variables: WorkspaceVariables, scope: 'global' | 'environment', env: string | undefined): WorkspaceVariable[] {
+  if (scope === 'global') return variables.globals
+  if (!env) throw new Error('environmentId is required for an environment variable.')
+  return findEnvironment(variables, env).variables
+}
+
+// Identifies a variable's current state. A write passes the revision it was based on, so a change made since then is refused.
+// A secret's value is never read here. Its encrypted form is fingerprinted instead, so a secret the app sets again still counts as a change.
+function variableRevision(workspaceId: string, row: WorkspaceVariable | undefined): string | null {
+  if (!row) return null
+  const sealed = row.secret ? secretFingerprint(workspaceId, row.id) : ''
+  return hashRaw(JSON.stringify({ id: row.id, name: row.name, secret: row.secret, value: row.secret ? '' : row.value, sealed }))
+}
+
+function changedSinceRead(name: string): Error {
+  return new Error(`"${name}" changed since you read it. Read it again with variable.get and review the change before writing.`)
+}
 
 export const environmentCommands = [
   defineCommand({
@@ -149,11 +168,31 @@ export const environmentCommands = [
     },
   }),
   defineCommand({
+    id: 'variable.get',
+    group: 'environment',
+    title: 'Get variable',
+    description:
+      'Read one variable and its revision. Secret values are never returned. Pass the revision to variable.set or variable.delete, so a change made since this read is refused.',
+    params: z.object({
+      workspaceId,
+      scope: scopeSchema,
+      environmentId: z.string().min(1).optional().describe('Required when scope is environment'),
+      name: variableNameSchema,
+    }),
+    readOnly: true,
+    run: ({ workspaceId: id, scope, environmentId: env, name }) => {
+      const { workspace } = readWorkspace(id)
+      const existing = rowsFor(variablesOf(workspace), scope, env).find((row) => row.name === name)
+      if (!existing) return { exists: false, name, scope, environmentId: env ?? null, revision: null }
+      return { exists: true, ...masked(existing), scope, environmentId: env ?? null, revision: variableRevision(id, existing) }
+    },
+  }),
+  defineCommand({
     id: 'variable.set',
     group: 'environment',
     title: 'Set variable',
     description:
-      'Create or update a variable in globals or one environment. Non-secret values can be set here. A secret variable is created with an empty value; its value must be entered in the desktop app, and an existing secret cannot be changed here.',
+      'Create or update a variable in globals or one environment. Read the variable with variable.get first and pass its revision as expectedRevision (null when it does not exist yet). A secret variable is created with an empty value; its value must be entered in the desktop app, and an existing secret cannot be changed here.',
     params: z.object({
       workspaceId,
       scope: scopeSchema,
@@ -161,14 +200,19 @@ export const environmentCommands = [
       name: variableNameSchema,
       value: variableValueSchema.optional(),
       secret: z.boolean().optional().describe('Secret variables keep their value in the app only'),
+      expectedRevision: z.string().min(1).nullable().optional().describe('Revision from variable.get; null when the variable does not exist yet'),
     }),
     readOnly: false,
-    run: ({ workspaceId: id, scope, environmentId: env, name, value, secret }) => {
-      updateWorkspace(id, (workspace) => {
+    run: ({ workspaceId: id, scope, environmentId: env, name, value, secret, expectedRevision }) => {
+      const updated = updateWorkspace(id, (workspace) => {
         const variables = variablesOf(workspace)
         if (scope === 'environment' && !env) throw new Error('environmentId is required for an environment variable.')
-        const rows = scope === 'global' ? variables.globals : findEnvironment(variables, env ?? '').variables
+        const rows = rowsFor(variables, scope, env)
         const existing = rows.find((row) => row.name === name)
+        if (expectedRevision !== undefined) {
+          if (existing && expectedRevision === null) throw new Error(`"${name}" already exists. Read it with variable.get and pass its revision.`)
+          if (variableRevision(id, existing) !== expectedRevision) throw changedSinceRead(name)
+        }
         if (existing?.secret && value !== undefined && value !== '') {
           throw new Error(`"${name}" is a secret. Change its value in the desktop app.`)
         }
@@ -186,20 +230,33 @@ export const environmentCommands = [
           environments: variables.environments.map((item) => (item.id === env ? { ...item, variables: nextRows } : item)),
         })
       })
-      return { name, scope, environmentId: env ?? null, secret: secret ?? null }
+      const written = rowsFor(variablesOf(updated), scope, env).find((row) => row.name === name)
+      return { name, scope, environmentId: env ?? null, secret: secret ?? null, revision: variableRevision(id, written) }
     },
   }),
   defineCommand({
     id: 'variable.delete',
     group: 'environment',
     title: 'Delete variable',
-    description: 'Delete a variable from globals or one environment. Requires confirm=true after the user confirms.',
-    params: z.object({ workspaceId, scope: scopeSchema, environmentId: z.string().min(1).optional(), name: variableNameSchema, confirm }),
+    description:
+      'Delete a variable from globals or one environment. Read it with variable.get first and pass its revision as expectedRevision. Requires confirm=true after the user confirms.',
+    params: z.object({
+      workspaceId,
+      scope: scopeSchema,
+      environmentId: z.string().min(1).optional(),
+      name: variableNameSchema,
+      expectedRevision: z.string().min(1).nullable().optional().describe('Revision from variable.get'),
+      confirm,
+    }),
     readOnly: false,
     destructive: true,
-    run: ({ workspaceId: id, scope, environmentId: env, name }) => {
+    run: ({ workspaceId: id, scope, environmentId: env, name, expectedRevision }) => {
       updateWorkspace(id, (workspace) => {
         const variables = variablesOf(workspace)
+        if (expectedRevision !== undefined) {
+          const existing = rowsFor(variables, scope, env).find((row) => row.name === name)
+          if (variableRevision(id, existing) !== expectedRevision) throw changedSinceRead(name)
+        }
         if (scope === 'global') {
           return withVariables(workspace, { ...variables, globals: variables.globals.filter((row) => row.name !== name) })
         }
