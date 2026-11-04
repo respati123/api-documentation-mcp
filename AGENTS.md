@@ -34,6 +34,7 @@ Install with `npm ci`. Node.js 22 or newer.
 - Commands that delete require `"confirm": true`.
 - Older tool names keep working. Removing one breaks clients configured earlier.
 - Tests set `API_DOCS_USER_DATA_DIR` to a temporary folder. A test never touches the real app data.
+- Everything an agent reads is in English: tool titles and descriptions, the guide, error messages, and code comments. A test checks the guide and the command texts for common Indonesian words.
 
 ## Git
 

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { allCommands } from '../commands/index.js'
 import { createGuideGate, guideText } from '../guide.js'
+
+// Common Indonesian words. The guide, tool titles, and descriptions are read by agents and must be English.
+const indonesianWords = /\b(yang|dan|untuk|tidak|dengan|atau|buat|hapus|ubah|kirim|pakai|harus|bisa|sudah|akan|dari)\b/i
 
 describe('guide gate', () => {
   it('lets read-only commands run before the guide is read', () => {
@@ -38,6 +42,13 @@ describe('guide text', () => {
     assert.match(guideText, /Use secret true/)
     assert.match(guideText, /Step 2 of Checkout/)
     assert.match(guideText, /Top level: one folder per service/)
+  })
+
+  it('is written in English, and so are the command titles and descriptions', () => {
+    assert.doesNotMatch(guideText, indonesianWords)
+    for (const command of allCommands) {
+      assert.doesNotMatch(`${command.title} ${command.description}`, indonesianWords, command.id)
+    }
   })
 
   it('uses the tool names the server exposes, not the dotted command ids', () => {
