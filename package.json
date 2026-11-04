@@ -24,7 +24,7 @@
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\" --log-level=warning && node -e \"require('fs').chmodSync('dist/index.js', 0o755)\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "prepack": "npm run build",
-    "test": "esbuild src/test/commands.test.ts --bundle --platform=node --format=esm --target=node22 --outfile=.test-out/commands.test.mjs --log-level=warning && node --test .test-out/commands.test.mjs"
+    "test": "esbuild src/test/commands.test.ts src/test/guide.test.ts --bundle --platform=node --format=esm --target=node22 --outdir=.test-out --out-extension:.js=.mjs --log-level=warning && node --test .test-out/commands.test.mjs .test-out/guide.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
