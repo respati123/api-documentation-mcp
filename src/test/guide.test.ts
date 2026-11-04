@@ -30,7 +30,14 @@ describe('guide text', () => {
     assert.match(guideText, /changes_preview/)
     assert.match(guideText, /Do not call changes_apply in the same turn/)
     assert.match(guideText, /confirm=true/)
-    assert.match(guideText, /Never write a real secret/)
+    assert.match(guideText, /Never write a real token, password, or key/)
+  })
+
+  it('covers auth, variables, docs per flow, and folders by service', () => {
+    assert.match(guideText, /token \{\{accessToken\}\}/)
+    assert.match(guideText, /Use secret true/)
+    assert.match(guideText, /Step 2 of Checkout/)
+    assert.match(guideText, /Top level: one folder per service/)
   })
 
   it('uses the tool names the server exposes, not the dotted command ids', () => {
