@@ -287,6 +287,25 @@ describe('persistence', () => {
 })
 
 describe('request.send target confirmation', () => {
+  it('fills a path parameter such as :id into the URL before sending', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', {
+      workspaceId,
+      parentId: null,
+      request: { name: 'Path', method: 'GET', url: '{{baseUrl}}/users/:id/orders', pathParams: [{ name: 'id', value: '42', enabled: true }] },
+    })) as { id: string }
+    const result = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true })) as { url: string }
+    assert.match(result.url, /\/users\/42\/orders$/)
+  })
+
+  it('refuses to send when a path parameter has no value', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Unfilled', method: 'GET', url: '{{baseUrl}}/users/:userId' } })) as { id: string }
+    await assert.rejects(run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true }), /userId/)
+  })
+
   it('dry run returns the URL it would call without sending', async () => {
     const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
     const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''

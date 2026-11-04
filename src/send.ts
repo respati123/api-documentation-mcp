@@ -62,6 +62,20 @@ export async function sendRequest(request: SyncRequest, workspace: StoredWorkspa
   }
 
   const url = new URL(f(request.url))
+  // A path segment such as :id takes the value of the enabled path parameter with that name. A segment with no value is reported as missing.
+  url.pathname = url.pathname
+    .split('/')
+    .map((segment) => {
+      if (!segment.startsWith(':')) return segment
+      const name = segment.slice(1)
+      const param = (request.pathParams ?? []).find((item) => item.enabled && item.name.trim() === name)
+      if (!param) {
+        missing.add(name)
+        return segment
+      }
+      return encodeURIComponent(f(param.value))
+    })
+    .join('/')
   for (const param of request.params ?? []) {
     if (param.enabled && param.name.trim()) url.searchParams.append(f(param.name.trim()), f(param.value))
   }
