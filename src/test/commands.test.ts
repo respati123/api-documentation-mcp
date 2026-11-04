@@ -7,6 +7,7 @@ import { after, before, describe, it } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { allCommands, executeCommand } from '../commands/index.js'
 import { describeParams } from '../registry.js'
+import { mcpCommands, missingTargetConfirmation, missingVariableRevision } from '../mcp-surface.js'
 import { readWorkspace, updateWorkspace } from '../store.js'
 
 // Each run gets its own data folder with the same schema the desktop app creates.
@@ -49,6 +50,22 @@ before(async () => {
 after(() => {
   echo.close()
   rmSync(dataDir, { recursive: true, force: true })
+})
+
+describe('MCP surface', () => {
+  it('exposes collection changes only through changes.preview and changes.apply', () => {
+    const ids = mcpCommands().map((command) => command.id)
+    for (const direct of ['folder.create', 'folder.rename', 'folder.delete', 'node.move', 'request.create', 'request.update', 'request.duplicate', 'request.deprecate', 'request.delete']) {
+      assert.ok(!ids.includes(direct), `${direct} should not be exposed to MCP clients`)
+    }
+    assert.ok(ids.includes('changes.preview'))
+    assert.ok(ids.includes('changes.apply'))
+    assert.ok(ids.includes('request.send'))
+  })
+
+  it('still lists those writes in the CLI registry', () => {
+    assert.ok(allCommands.some((command) => command.id === 'request.create'))
+  })
 })
 
 describe('command registry', () => {
@@ -266,5 +283,177 @@ describe('persistence', () => {
     assert.ok(Array.isArray(workspace.tree))
     assert.ok(workspace.variables && Array.isArray(workspace.variables.environments))
     writeFileSync(join(dataDir, 'ok.txt'), 'ok')
+  })
+})
+
+describe('request.send target confirmation', () => {
+  it('fills a path parameter such as :id into the URL before sending', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', {
+      workspaceId,
+      parentId: null,
+      request: { name: 'Path', method: 'GET', url: '{{baseUrl}}/users/:id/orders', pathParams: [{ name: 'id', value: '42', enabled: true }] },
+    })) as { id: string }
+    const result = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true })) as { url: string }
+    assert.match(result.url, /\/users\/42\/orders$/)
+  })
+
+  it('refuses to send when a path parameter has no value', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Unfilled', method: 'GET', url: '{{baseUrl}}/users/:userId' } })) as { id: string }
+    await assert.rejects(run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true }), /userId/)
+  })
+
+  it('dry run returns the URL it would call without sending', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Dry', method: 'GET', url: '{{baseUrl}}/dry' } })) as { id: string }
+    const result = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true })) as { dryRun: boolean; method: string; url: string }
+    assert.equal(result.dryRun, true)
+    assert.equal(result.method, 'GET')
+    assert.match(result.url, /\/dry$/)
+  })
+
+  it('refuses to send when the URL differs from the one confirmed', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Moved', method: 'GET', url: '{{baseUrl}}/moved' } })) as { id: string }
+    await assert.rejects(
+      run('request.send', { workspaceId, requestId: request.id, environmentId: staging, confirmUrl: 'http://elsewhere.test/moved' }),
+      /target changed/,
+    )
+  })
+
+  it('sends when the confirmed URL matches', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const request = (await run('request.create', { workspaceId, parentId: null, request: { name: 'Confirmed', method: 'GET', url: '{{baseUrl}}/ping' } })) as { id: string }
+    const dry = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, dryRun: true })) as { url: string }
+    const sent = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging, confirmUrl: dry.url })) as { status: number }
+    assert.equal(sent.status, 201)
+  })
+
+  it('the MCP surface requires a dry run or a confirmed URL before a send', () => {
+    assert.match(missingTargetConfirmation('request.send', {}) ?? '', /dryRun/)
+    assert.equal(missingTargetConfirmation('request.send', { dryRun: true }), null)
+    assert.equal(missingTargetConfirmation('request.send', { confirmUrl: 'http://x.test' }), null)
+    assert.equal(missingTargetConfirmation('request.get', {}), null)
+  })
+})
+
+describe('variables and revisions', () => {
+  // Writes the stored secret the way the desktop app does, so a secret change can be seen without reading its value.
+  const storeSecret = (workspaceId: string, variableId: string, sealed: string) => {
+    const connection = new DatabaseSync(join(dataDir, 'workspace.sqlite'))
+    connection
+      .prepare('INSERT INTO secrets (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(`workspace-variable:${workspaceId}:${variableId}`, Buffer.from(sealed))
+    connection.close()
+  }
+
+  it('variable.get returns a value with its revision, and never a secret value', async () => {
+    const ws = (await run('workspace.create', { name: 'Vars' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'baseUrl', value: 'https://a.test', expectedRevision: null })
+    const got = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'baseUrl' })) as { value: string; revision: string | null; exists: boolean }
+    assert.equal(got.exists, true)
+    assert.equal(got.value, 'https://a.test')
+    assert.ok(got.revision)
+
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'token', secret: true, expectedRevision: null })
+    const secret = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'token' })) as { value: string; secret: boolean }
+    assert.equal(secret.secret, true)
+    assert.equal(secret.value, '<secret>')
+  })
+
+  it('refuses an update based on a revision that is out of date', async () => {
+    const ws = (await run('workspace.create', { name: 'Stale' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'host', value: 'one', expectedRevision: null })
+    const first = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'host' })) as { revision: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'host', value: 'two', expectedRevision: first.revision })
+
+    await assert.rejects(
+      run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'host', value: 'three', expectedRevision: first.revision }),
+      /changed since you read it/,
+    )
+    assert.equal((await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'host' }) as { value: string }).value, 'two')
+  })
+
+  it('refuses to create a variable that already exists', async () => {
+    const ws = (await run('workspace.create', { name: 'Exists' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'region', value: 'eu', expectedRevision: null })
+    await assert.rejects(run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'region', value: 'us', expectedRevision: null }), /already exists/)
+  })
+
+  it('sees a secret that the app set again, so a stale delete is refused', async () => {
+    const ws = (await run('workspace.create', { name: 'Secrets' })) as { id: string }
+    await run('variable.set', { workspaceId: ws.id, scope: 'global', name: 'apiKey', secret: true, expectedRevision: null })
+    const before = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'apiKey' })) as { id: string; revision: string }
+
+    storeSecret(ws.id, before.id, 'sealed-value-1')
+    const after = (await run('variable.get', { workspaceId: ws.id, scope: 'global', name: 'apiKey' })) as { revision: string }
+    assert.notEqual(after.revision, before.revision)
+
+    await assert.rejects(run('variable.delete', { workspaceId: ws.id, scope: 'global', name: 'apiKey', confirm: true, expectedRevision: before.revision }), /changed since you read it/)
+  })
+
+  it('the MCP surface requires a revision for variable writes, and not for reads', () => {
+    assert.match(missingVariableRevision('variable.set', { name: 'x' }) ?? '', /variable.get/)
+    assert.match(missingVariableRevision('variable.delete', {}) ?? '', /variable.get/)
+    assert.equal(missingVariableRevision('variable.set', { expectedRevision: null }), null)
+    assert.equal(missingVariableRevision('variable.get', {}), null)
+  })
+})
+
+describe('accounts and cloud copies', () => {
+  // The desktop app writes the signed-in account id to app_settings. The CLI reads it from there.
+  const setActiveAccount = (userId: string | null) => {
+    const connection = new DatabaseSync(join(dataDir, 'workspace.sqlite'))
+    connection.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    if (userId === null) connection.exec("DELETE FROM app_settings WHERE key = 'active-account'")
+    else
+      connection
+        .prepare("INSERT INTO app_settings (key, value) VALUES ('active-account', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(userId)
+    connection.close()
+  }
+
+  after(() => setActiveAccount(null))
+
+  it('a new local workspace belongs to the device, not to an account', async () => {
+    setActiveAccount('account-a')
+    const created = (await run('workspace.create', { name: 'Device vault item' })) as { id: string }
+    assert.equal(readWorkspace(created.id).workspace.accountId ?? null, null)
+    setActiveAccount('account-b')
+    assert.ok(((await run('workspace.list', {})) as Array<{ id: string }>).some((item) => item.id === created.id))
+  })
+
+  it('lists and reads only the active account’s cloud copies', async () => {
+    setActiveAccount('account-a')
+    const mine = (await run('workspace.create', { name: 'Mine' })) as { id: string }
+    updateWorkspace(mine.id, (workspace) => ({ ...workspace, cloudId: 'cloud-mine', accountId: 'account-a' }))
+    setActiveAccount('account-b')
+    const theirs = (await run('workspace.create', { name: 'Theirs' })) as { id: string }
+    updateWorkspace(theirs.id, (workspace) => ({ ...workspace, cloudId: 'cloud-theirs', accountId: 'account-b' }))
+
+    const listed = (await run('workspace.list', {})) as Array<{ id: string }>
+    assert.ok(listed.some((item) => item.id === theirs.id))
+    assert.ok(!listed.some((item) => item.id === mine.id))
+    assert.throws(() => readWorkspace(mine.id), /was not found/)
+  })
+
+  it('refuses edits to a cloud copy, which are made in the desktop app and pushed from there', async () => {
+    setActiveAccount(null)
+    const created = (await run('workspace.create', { name: 'Cloud copy' })) as { id: string }
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-1' }))
+    await assert.rejects(run('folder.create', { workspaceId: created.id, parentId: null, name: 'Nope' }), /desktop app/)
+  })
+
+  it('keeps an existing accountId when a collection changes', async () => {
+    const created = (await run('workspace.create', { name: 'Edited' })) as { id: string }
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, accountId: 'account-a' }))
+    await run('folder.create', { workspaceId: created.id, parentId: null, name: 'Folder' })
+    assert.equal(readWorkspace(created.id).workspace.accountId, 'account-a')
   })
 })

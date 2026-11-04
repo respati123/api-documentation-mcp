@@ -54,6 +54,8 @@ export type StoredWorkspace = {
   baseCommitId?: string | null
   localHeadId?: string | null
   role?: 'owner' | 'editor' | 'viewer' | null
+  // The account that owns this copy on the device. Null or missing means it predates accounts.
+  accountId?: string | null
   [key: string]: unknown
 }
 
