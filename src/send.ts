@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 import type { SyncRequest, StoredWorkspace, WorkspaceVariable } from './types.js'
 import { sanitizeUrl } from './redact.js'
 
@@ -88,15 +90,26 @@ export async function sendRequest(request: SyncRequest, workspace: StoredWorkspa
     else headers.set(f(auth.name), f(auth.value))
   }
 
-  let body: string | undefined
+  let body: string | Blob | FormData | undefined
   const mode = request.bodyMode ?? 'none'
   if (mode === 'urlencoded') {
     const form = new URLSearchParams()
     for (const field of request.bodyFields ?? []) if (field.enabled && field.type === 'text') form.append(f(field.name), f(field.value))
     body = form.toString()
     headers.set('Content-Type', 'application/x-www-form-urlencoded;charset=UTF-8')
-  } else if (mode === 'form-data' || mode === 'file') {
-    throw new Error(`request.send does not send ${mode} bodies yet. Send this request from the desktop app.`)
+  } else if (mode === 'form-data') {
+    const form = new FormData()
+    for (const field of request.bodyFields ?? []) {
+      if (!field.enabled) continue
+      if (field.type === 'text') form.append(f(field.name), f(field.value))
+      else if (field.filePath) form.append(f(field.name), new Blob([await readFile(field.filePath)]), field.fileName || basename(field.filePath))
+    }
+    // fetch sets the multipart Content-Type with its boundary, so no header is set here.
+    body = form
+  } else if (mode === 'file') {
+    if (!request.bodyPath) throw new Error('This request has no file to send as its body.')
+    body = new Blob([await readFile(request.bodyPath)])
+    if (!headers.has('Content-Type')) headers.set('Content-Type', request.bodyMimeType || 'application/octet-stream')
   } else if (mode !== 'none' && request.body) {
     body = f(request.body)
     if (!headers.has('Content-Type')) headers.set('Content-Type', request.bodyMimeType || defaultMime[mode] || 'text/plain')
