@@ -443,11 +443,22 @@ describe('accounts and cloud copies', () => {
     assert.throws(() => readWorkspace(mine.id), /was not found/)
   })
 
-  it('refuses edits to a cloud copy, which are made in the desktop app and pushed from there', async () => {
+  it('lets MCP edit a cloud copy, and the edit stays on this device until the desktop app pushes it', async () => {
     setActiveAccount(null)
     const created = (await run('workspace.create', { name: 'Cloud copy' })) as { id: string }
-    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-1' }))
-    await assert.rejects(run('folder.create', { workspaceId: created.id, parentId: null, name: 'Nope' }), /desktop app/)
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-1', baseTree: workspace.tree }))
+    await run('folder.create', { workspaceId: created.id, parentId: null, name: 'Added by MCP' })
+    const stored = readWorkspace(created.id).workspace
+    assert.equal(stored.cloudId, 'cloud-copy-1')
+    assert.equal(stored.tree.length, 1)
+    assert.deepEqual(stored.baseTree, [])
+  })
+
+  it('still refuses a viewer’s edit to a cloud copy', async () => {
+    setActiveAccount(null)
+    const created = (await run('workspace.create', { name: 'Viewed copy' })) as { id: string }
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-2', role: 'viewer' }))
+    await assert.rejects(run('folder.create', { workspaceId: created.id, parentId: null, name: 'Nope' }), /read-only/)
   })
 
   it('keeps an existing accountId when a collection changes', async () => {
@@ -457,3 +468,66 @@ describe('accounts and cloud copies', () => {
     assert.equal(readWorkspace(created.id).workspace.accountId, 'account-a')
   })
 })
+
+// A local file path is set by the desktop app, never through MCP: an AI client could otherwise point a request at any file and send it out.
+function setLocalFilePaths(workspaceIdValue: string, requestId: string, paths: { bodyPath?: string; fieldPath?: string }) {
+  const apply = (nodes: unknown[]): unknown[] =>
+    nodes.map((node) => {
+      const item = node as Record<string, unknown>
+      if (item.id === requestId) {
+        const fields = Array.isArray(item.bodyFields) ? (item.bodyFields as Array<Record<string, unknown>>) : []
+        return {
+          ...item,
+          ...(paths.bodyPath ? { bodyPath: paths.bodyPath } : {}),
+          ...(paths.fieldPath ? { bodyFields: fields.map((field) => (field.type === 'file' ? { ...field, filePath: paths.fieldPath } : field)) } : {}),
+        }
+      }
+      return item.kind === 'folder' ? { ...item, children: apply(item.children as unknown[]) } : item
+    })
+  updateWorkspace(workspaceIdValue, (workspace) => ({ ...workspace, tree: apply(workspace.tree) as typeof workspace.tree }))
+}
+
+describe('request.send file bodies', () => {
+  it('sends a form-data request with text fields and a file field', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const filePath = join(dataDir, 'report.txt')
+    writeFileSync(filePath, 'hello file')
+    const request = (await run('request.create', {
+      workspaceId,
+      parentId: null,
+      request: {
+        name: 'Upload form',
+        method: 'POST',
+        url: '{{baseUrl}}/upload',
+        bodyMode: 'form-data',
+        bodyFields: [
+          { name: 'title', value: 'Report', enabled: true, type: 'text' },
+          { name: 'doc', value: '', enabled: true, type: 'file', filePath, fileName: 'report.txt' },
+        ],
+      },
+    })) as { id: string }
+    setLocalFilePaths(workspaceId, request.id, { fieldPath: filePath })
+    const result = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging })) as { body: string }
+    const echoed = (JSON.parse(result.body) as { body: string }).body
+    assert.ok(echoed.includes('name="title"'))
+    assert.ok(echoed.includes('Report'))
+    assert.ok(echoed.includes('hello file'))
+  })
+
+  it('sends a file body with its bytes', async () => {
+    const environments = (await run('environment.list', { workspaceId })) as { environments: Array<{ id: string; name: string }> }
+    const staging = environments.environments.find((item) => item.name === 'staging')?.id ?? ''
+    const bodyPath = join(dataDir, 'payload.json')
+    writeFileSync(bodyPath, '{"ok":true}')
+    const request = (await run('request.create', {
+      workspaceId,
+      parentId: null,
+      request: { name: 'Upload file', method: 'PUT', url: '{{baseUrl}}/raw', bodyMode: 'file', bodyMimeType: 'application/json' },
+    })) as { id: string }
+    setLocalFilePaths(workspaceId, request.id, { bodyPath })
+    const result = (await run('request.send', { workspaceId, requestId: request.id, environmentId: staging })) as { body: string }
+    assert.equal((JSON.parse(result.body) as { body: string }).body, '{"ok":true}')
+  })
+})
+
