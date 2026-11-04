@@ -443,11 +443,22 @@ describe('accounts and cloud copies', () => {
     assert.throws(() => readWorkspace(mine.id), /was not found/)
   })
 
-  it('refuses edits to a cloud copy, which are made in the desktop app and pushed from there', async () => {
+  it('lets MCP edit a cloud copy, and the edit stays on this device until the desktop app pushes it', async () => {
     setActiveAccount(null)
     const created = (await run('workspace.create', { name: 'Cloud copy' })) as { id: string }
-    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-1' }))
-    await assert.rejects(run('folder.create', { workspaceId: created.id, parentId: null, name: 'Nope' }), /desktop app/)
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-1', baseTree: workspace.tree }))
+    await run('folder.create', { workspaceId: created.id, parentId: null, name: 'Added by MCP' })
+    const stored = readWorkspace(created.id).workspace
+    assert.equal(stored.cloudId, 'cloud-copy-1')
+    assert.equal(stored.tree.length, 1)
+    assert.deepEqual(stored.baseTree, [])
+  })
+
+  it('still refuses a viewer’s edit to a cloud copy', async () => {
+    setActiveAccount(null)
+    const created = (await run('workspace.create', { name: 'Viewed copy' })) as { id: string }
+    updateWorkspace(created.id, (workspace) => ({ ...workspace, cloudId: 'cloud-copy-2', role: 'viewer' }))
+    await assert.rejects(run('folder.create', { workspaceId: created.id, parentId: null, name: 'Nope' }), /read-only/)
   })
 
   it('keeps an existing accountId when a collection changes', async () => {

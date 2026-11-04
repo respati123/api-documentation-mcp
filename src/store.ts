@@ -90,9 +90,9 @@ export function readWorkspace(workspaceId: string): { raw: string; workspace: St
   return { raw: row.data, workspace }
 }
 
+// An edit to a cloud copy changes only this device's copy. The cloud changes when the desktop app pushes it.
 export function assertCanEdit(workspace: StoredWorkspace): void {
   if (workspace.role === 'viewer') throw new Error('This workspace is read-only for the current account.')
-  if (workspace.cloudId) throw new Error('Cloud copies are edited in the desktop app, then pushed to the cloud from there.')
 }
 
 // Reads, changes, and writes one workspace in a single immediate transaction, so two commands cannot interleave.
