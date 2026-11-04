@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { readFileSync } from 'node:fs'
 import { allCommands } from '../commands/index.js'
 import { createGuideGate, guideText } from '../guide.js'
+import { mcpCommands } from '../mcp-surface.js'
+
+// Tools an MCP client can call: every exposed command (dots become underscores), plus the guide and list_commands tools.
+const exposedTools = new Set([...mcpCommands().map((command) => command.id.replace(/\./g, '_')), 'guide', 'list_commands'])
+// The operations a change accepts, set inside changes_preview. MCP clients have no direct folder or request write tools.
+const changeOperations = ['create_folder', 'rename_folder', 'move_node', 'delete_node', 'create_request', 'update_request', 'deprecate_request']
 
 // Common Indonesian words. The guide, tool titles, and descriptions are read by agents and must be English.
 const indonesianWords = /\b(yang|dan|untuk|tidak|dengan|atau|buat|hapus|ubah|kirim|pakai|harus|bisa|sudah|akan|dari)\b/i
@@ -49,6 +56,18 @@ describe('guide text', () => {
     for (const command of allCommands) {
       assert.doesNotMatch(`${command.title} ${command.description}`, indonesianWords, command.id)
     }
+  })
+
+  it('names only tools an MCP client can call, and real change operations', () => {
+    const names = new Set(guideText.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [])
+    for (const name of names) {
+      assert.ok(exposedTools.has(name) || changeOperations.includes(name), `the guide names ${name}, which MCP clients cannot call`)
+    }
+  })
+
+  it('lists change operations that the schema accepts', () => {
+    const schema = readFileSync('src/schemas.ts', 'utf8')
+    for (const operation of changeOperations) assert.match(schema, new RegExp(`'${operation}'`), operation)
   })
 
   it('uses the tool names the server exposes, not the dotted command ids', () => {
