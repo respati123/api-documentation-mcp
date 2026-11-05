@@ -48,6 +48,8 @@ export function safeRequest(request: SyncRequest): SyncRequest {
     url: sanitizeUrl(request.url),
     body: redactBody(request.body),
     ...(request.documentation ? { documentation: redactBody(request.documentation) } : {}),
+    ...(request.preScript ? { preScript: redactBody(request.preScript) } : {}),
+    ...(request.postScript ? { postScript: redactBody(request.postScript) } : {}),
     ...(request.responses
       ? {
           responses: request.responses.map((response) => ({

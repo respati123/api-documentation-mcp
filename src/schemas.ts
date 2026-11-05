@@ -57,6 +57,8 @@ export const requestFields = {
   pathParams: z.array(fieldSchema).max(100).optional(),
   auth: authSchema.optional(),
   documentation: z.string().max(100_000).optional(),
+  preScript: z.string().max(50_000).optional().describe('JavaScript that runs before the request is sent. Uses the apidocs object.'),
+  postScript: z.string().max(50_000).optional().describe('JavaScript that runs after the response arrives. Uses the apidocs object.'),
   responses: z.array(responseDefinitionSchema).max(100).optional(),
   deprecated: z.boolean().optional(),
   deprecationReason: z.string().max(4096).optional(),
