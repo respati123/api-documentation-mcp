@@ -58,7 +58,7 @@ export async function sendRequest(request: SyncRequest, workspace: StoredWorkspa
   const { values, blocked } = resolveVariables(workspace, environmentId)
   const missing = new Set<string>()
   const f = (text: string) => fill(text, values, missing)
-  const headers = new Headers({ Accept: '*/*', 'User-Agent': 'API-Documentation-CLI/0.2.0' })
+  const headers = new Headers({ Accept: '*/*', 'User-Agent': 'API-Documentation-CLI/0.4.0' })
   for (const header of request.headers ?? []) {
     if (header.enabled && header.name.trim()) headers.set(f(header.name.trim()), f(header.value))
   }
