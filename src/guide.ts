@@ -55,6 +55,14 @@ Every request gets:
 
 Write it in the request's documentation field and its responses. Put the flow overview in the flow folder's first request. If a part is unknown, write "Unknown: ..." and ask the user. Do not fill it with a guess.
 
+## 5b. Scripts: setup and checks that run in the app
+- A request can have a preScript, which runs before the request is sent, and a postScript, which runs after the response arrives. Each is JavaScript text of up to 50,000 characters. Set them with request.create, request.update, or a create_request or update_request change in changes_preview.
+- Scripts run only in the desktop app. The MCP server stores them but never runs them, and request.send does not run them. Tell the user this when they expect a script to run.
+- The script object is apidocs. apidocs.vars has get, set, has, and remove; set and remove take { scope: "global" } to change a global. apidocs.req (pre-request only) has url, method, setHeader, and dropHeader. apidocs.res (post-response only) has status, elapsed, header, text, and data. apidocs.check(name, fn) adds a named test. apidocs.assert(value) has equals, isTrue, isFalse, includes, below, above, and hasKey. apidocs.log writes to the Console tab.
+- The sandbox has no require, fetch, console, timers, or file access. apidocs.send is not supported yet.
+- A script stops after 2 seconds or at 32 MB of memory. A script error shows its line in the app's Console tab.
+- Never write a real secret in a script. A script can read a secret variable with apidocs.vars.get, but it cannot set one.
+
 ## 6. Changing collections: preview, ask, then apply
 - Every change to folders or requests goes through changes_preview. Apply it with changes_apply only after the user approves that exact preview.
 - The change operations are: create_folder, rename_folder, move_node, delete_node, create_request, update_request, and deprecate_request. Each one is set inside changes_preview. There are no direct folder or request write tools over MCP.

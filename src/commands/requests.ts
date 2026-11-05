@@ -36,7 +36,7 @@ export const requestCommands = [
     id: 'request.get',
     group: 'request',
     title: 'Read request',
-    description: 'Read one request definition: params, body, auth, headers, documented responses, and documentation. Literal secrets are redacted; {{variable}} references are shown as written.',
+    description: 'Read one request definition: params, body, auth, headers, documented responses, documentation, and scripts. Literal secrets are redacted; {{variable}} references are shown as written.',
     params: z.object({ workspaceId, requestId }),
     readOnly: true,
     run: ({ workspaceId: id, requestId: request }) => safeRequest(findRequest(readWorkspace(id).workspace.tree, request)),
@@ -45,7 +45,7 @@ export const requestCommands = [
     id: 'request.create',
     group: 'request',
     title: 'Create request',
-    description: 'Create a request under a folder, or at the root when parentId is null. Use {{variableName}} for environment-specific values.',
+    description: 'Create a request under a folder, or at the root when parentId is null. Use {{variableName}} for environment-specific values. preScript and postScript run only in the desktop app.',
     params: z.object({ workspaceId, parentId, request: z.object(requestFields) }),
     readOnly: false,
     run: ({ workspaceId: id, parentId: parent, request }) => {
@@ -62,7 +62,7 @@ export const requestCommands = [
     id: 'request.update',
     group: 'request',
     title: 'Update request',
-    description: 'Change fields of a request. Only the fields you send are changed; existing auth is kept unless you send auth.',
+    description: 'Change fields of a request. Only the fields you send are changed; existing auth is kept unless you send auth. preScript and postScript run only in the desktop app.',
     params: z.object({ workspaceId, requestId, patch: z.object(requestFields).partial() }),
     readOnly: false,
     run: ({ workspaceId: id, requestId: request, patch }) => {
