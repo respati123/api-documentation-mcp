@@ -22,7 +22,7 @@ const instructions =
   'Drive the API Documentation desktop app: list workspaces, read and change collections, requests, environments, and variables, and send requests. Call list_commands first to see every command and its parameters. Search and read requests before changing them. Record known route, parameters, headers, body, auth, and response contracts, and do not invent missing details. Use {{baseUrl}} or other descriptive {{variableName}} references for environment-specific values, and {{accessToken}} for credentials. Never write a real secret: secret variables are created empty, and their values are entered in the desktop app. Changes to collections go through changes.preview; render the diff in chat (workspace, full collection paths, before and after for each field, nested deletion impact), ask the user to approve that exact preview, and stop. Never call changes.apply in the same turn as the preview. Destructive commands require confirm=true, which is only set after the user explicitly confirms. Call guide before the first change: write commands are refused until it has been read in this session.'
 
 export async function startMcpServer(): Promise<void> {
-  const server = new McpServer({ name: 'api-documentation-local', version: '0.2.0' }, { instructions })
+  const server = new McpServer({ name: 'api-documentation-local', version: '0.4.0' }, { instructions })
   const guide = createGuideGate()
 
   const register = (name: string, commandId: string, title: string, description: string) => {
