@@ -28,6 +28,8 @@ export type SyncRequest = {
   pathParams?: ParamField[]
   auth?: RequestAuth
   documentation?: string
+  preScript?: string
+  postScript?: string
   responses?: ResponseDefinition[]
   openApiSchemas?: Record<string, unknown>
   deprecated?: boolean

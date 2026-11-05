@@ -109,6 +109,28 @@ describe('workspace and collection', () => {
     assert.equal(after.name, 'Login')
   })
 
+  it('stores pre-request and post-response scripts and changes them with request.update', async () => {
+    const created = (await run('request.create', {
+      workspaceId,
+      parentId: null,
+      request: {
+        name: 'Scripted',
+        method: 'GET',
+        url: '{{baseUrl}}/me',
+        preScript: 'apidocs.vars.set("trace", "1")',
+        postScript: 'apidocs.check("status", () => apidocs.assert(apidocs.res.status).equals(200))',
+      },
+    })) as { id: string }
+    const first = (await run('request.get', { workspaceId, requestId: created.id })) as { preScript?: string; postScript?: string }
+    assert.equal(first.preScript, 'apidocs.vars.set("trace", "1")')
+    assert.match(first.postScript ?? '', /apidocs\.check\("status"/)
+
+    await run('request.update', { workspaceId, requestId: created.id, patch: { preScript: '' } })
+    const after = (await run('request.get', { workspaceId, requestId: created.id })) as { preScript?: string; postScript?: string }
+    assert.equal(after.preScript, '')
+    assert.equal(after.postScript, first.postScript)
+  })
+
   it('duplicates a request with new ids and a _copy name', async () => {
     const found = (await run('request.search', { workspaceId, query: 'login' })) as Array<{ id: string }>
     const original = found[0]?.id ?? ''
