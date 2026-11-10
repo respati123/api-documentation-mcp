@@ -17,7 +17,8 @@ Read this before any change. It sets how requests, variables, folders, and docs 
 - Move an existing item with a move_node change. Rename a folder with a rename_folder change. Do not delete and recreate a folder to move it, because its requests lose their place.
 
 ## 2. Requests: name and order
-- Name a request "METHOD resource action", for example "POST /invoices create". Keep the method visible in the name.
+- Name a request with the endpoint's name only, not its URL or its HTTP method. Use a short verb phrase in Sentence case: "Create invoice", "List invoices", "Get invoice by id", "Cancel order". The method and the URL belong in the request itself, not in its name.
+- Use the same verb for the same action in every folder: Create, List, Get, Update, Delete, Cancel. Do not write "Add" in one place and "Create" in another for the same action.
 - In a flow folder, prefix each request with its step: "1 Create cart", "2 Add item", "3 Checkout". The order must match the real order of calls.
 
 ## 3. Auth: set it for every request that needs it
@@ -43,17 +44,21 @@ Where a variable works: {{name}} resolves in the URL, params, headers, body, and
 
 Writes: variable_set and variable_delete take the revision from variable_get as expectedRevision. Use null for a variable that does not exist yet. A stale revision is refused, so read again and retry.
 
-## 5. Documentation: complete, and per business flow
-Every request gets:
-- Purpose: what the endpoint does, in one or two sentences.
-- Place in the flow: "Step 2 of Checkout. Before: Create cart. After: Confirm order." Name the requests.
-- Preconditions: what must be true first, and which variables must be set.
-- Auth: which variable provides it.
-- Request: each param, header, and body field, with its type, whether it is required, what it means, and a realistic example. Use {{variables}} in examples, never a real value.
-- Responses: one entry per status code the contract lists, with an example body. Include the error responses: which code, which error body, and when it happens.
-- Side effects: what changes on the server or in other requests.
+## 5. Endpoint documentation: the Docs tab of each request
+Every request must have its Docs tab filled in, so a reader knows why the endpoint exists without reading the code. Write it in the request's documentation field, in this order. Keep each part short. Use headings, short lists, and tables for parameters and responses.
 
-Write it in the request's documentation field and its responses. Put the flow overview in the flow folder's first request. If a part is unknown, write "Unknown: ..." and ask the user. Do not fill it with a guess.
+1. Purpose: one or two sentences on what the endpoint does. Start with a verb, for example "Creates an invoice for a confirmed order."
+2. Business need: the feature or flow that needs this endpoint, and who calls it (web app, desktop app, or another service).
+3. Place in the flow: "Step 2 of Checkout. Before: 1 Create cart. After: 3 Confirm order." Name the requests exactly as they are named in the workspace.
+4. Preconditions: what must be true first, and which variables must be set.
+5. Auth: which variable provides it, for example {{accessToken}}.
+6. Request: a table with name, location (path, query, header, or body), type, required, meaning, and example. Use {{variables}} in examples, never a real value.
+7. Responses: one entry per status code the contract lists, with an example body. Write the same entries in the request's documented responses. Include the error responses: the code, the error body, and when it happens.
+8. Side effects: what data changes on the server, and which other requests are affected.
+9. Related: the requests this one depends on or affects, named as they appear in the workspace. Name only requests that exist in the workspace.
+10. Unknown: anything the contract does not say. Write "Unknown: ..." and ask the user. Do not guess.
+
+Each endpoint's Docs tab covers only that endpoint. Put the flow overview in the first request of the flow folder.
 
 ## 5b. Scripts: setup and checks that run in the app
 - A request can have a preScript, which runs before the request is sent, and a postScript, which runs after the response arrives. Each is JavaScript text of up to 50,000 characters. Set them with request.create, request.update, or a create_request or update_request change in changes_preview.
@@ -77,6 +82,14 @@ Write it in the request's documentation field and its responses. Put the flow ov
 - Send only when the user asks. Say which environment is active first.
 - A variable with no value stops the send, and the error names it. Fill it in the app, or ask.
 - Do not send a request that changes data on a production server without asking.
+
+## 8b. Saved responses
+- A request can use a value from the last successful (200) response of another request: {{response.<requestId>.body.<JSONPath>}}, {{response.<requestId>.raw}}, or {{response.<requestId>.header.<name>}}. Example: "Authorization: Bearer {{response.login.body.$.data.accessToken}}".
+- The JSONPath supports dot names and [index] only, such as $.data.items[0].id. Any other path is refused.
+- request.send never re-sends the referred request. If the referred request has no saved response yet, the send stops and names it. Send that request first.
+- A successful request.send saves its 200 response for later references. Responses are saved only in the local data folder, never synced.
+- Saved values are real values, so they are sent as they are. The send output hides tokens in headers and JSON bodies, but the value still goes to the server the request calls. Do not point a saved token at a server the user does not trust.
+- Names that start with "response." cannot be used for variables.
 
 ## 9. Limits
 - Cloud workspaces are read-only over MCP. Changes to a cloud copy are made in the desktop app.

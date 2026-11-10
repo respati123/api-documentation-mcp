@@ -1,7 +1,10 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import type { SyncRequest, StoredWorkspace, WorkspaceVariable } from './types.js'
-import { sanitizeUrl } from './redact.js'
+import { isSensitiveName, maskSecret, redactBody, sanitizeUrl } from './redact.js'
+import { dataDirectory } from './store.js'
+import { referencedRequestIds, resolveResponseReference, responsePrefix, type SavedResponseSnapshot } from './response-references.js'
+import { readSavedResponse, saveResponse } from './saved-responses.js'
 
 const timeoutMs = 30_000
 const maxBodyChars = 1_000_000
@@ -26,8 +29,20 @@ function resolveVariables(workspace: StoredWorkspace, environmentId: string | nu
   return { values, blocked }
 }
 
-function fill(text: string, values: Map<string, string>, missing: Set<string>): string {
+// Loads the saved responses that the request's {{response.<id>...}} references use. Only those are read.
+async function loadReferencedResponses(workspaceId: string, request: SyncRequest): Promise<Map<string, SavedResponseSnapshot>> {
+  const savedResponses = new Map<string, SavedResponseSnapshot>()
+  for (const requestId of referencedRequestIds(JSON.stringify(request))) {
+    const saved = await readSavedResponse(dataDirectory(), workspaceId, requestId)
+    if (saved) savedResponses.set(requestId, saved)
+  }
+  return savedResponses
+}
+
+// A reference to a saved response is filled from that response. A reference that cannot be resolved stops the send with its error.
+function fill(text: string, values: Map<string, string>, missing: Set<string>, savedResponses: Map<string, SavedResponseSnapshot>): string {
   return text.replace(variablePattern, (match, name: string) => {
+    if (name.startsWith(responsePrefix)) return resolveResponseReference(name, savedResponses)
     const value = values.get(name)
     if (value === undefined) {
       missing.add(name)
@@ -57,7 +72,8 @@ export type SendOptions = {
 export async function sendRequest(request: SyncRequest, workspace: StoredWorkspace, environmentId: string | null, options: SendOptions = {}) {
   const { values, blocked } = resolveVariables(workspace, environmentId)
   const missing = new Set<string>()
-  const f = (text: string) => fill(text, values, missing)
+  const savedResponses = await loadReferencedResponses(workspace.id, request)
+  const f = (text: string) => fill(text, values, missing, savedResponses)
   const headers = new Headers({ Accept: '*/*', 'User-Agent': 'API-Documentation-CLI/0.4.0' })
   for (const header of request.headers ?? []) {
     if (header.enabled && header.name.trim()) headers.set(f(header.name.trim()), f(header.value))
@@ -137,13 +153,17 @@ export async function sendRequest(request: SyncRequest, workspace: StoredWorkspa
     signal: AbortSignal.timeout(timeoutMs),
   })
   const text = await response.text()
+  const responseHeaders = Object.fromEntries(response.headers.entries())
+  // A 200 response is kept for later references. Saving is best effort: it never fails the send.
+  await saveResponse(dataDirectory(), { workspaceId: workspace.id, requestId: request.id, status: response.status, statusText: response.statusText, headers: responseHeaders, body: text }).catch(() => false)
+  // What goes back to the client is redacted: a token in a header or a JSON body is hidden.
   return {
     status: response.status,
     statusText: response.statusText,
     url: sanitizeUrl(response.url || url.toString()),
     durationMs: Date.now() - started,
-    headers: Object.fromEntries(response.headers.entries()),
-    body: text.length > maxBodyChars ? text.slice(0, maxBodyChars) : text,
+    headers: Object.fromEntries(Object.entries(responseHeaders).map(([name, value]) => [name, isSensitiveName(name) ? maskSecret(value) : value])),
+    body: redactBody(text.length > maxBodyChars ? text.slice(0, maxBodyChars) : text),
     bodyTruncated: text.length > maxBodyChars,
   }
 }
