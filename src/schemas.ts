@@ -77,5 +77,11 @@ export const operationSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('delete_node'), nodeId: z.string().min(1) }),
 ])
 
-export const variableNameSchema = z.string().trim().min(1).max(160)
+// The response. prefix is reserved for saved response references, so a variable cannot use it.
+export const variableNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(160)
+  .refine((name) => !name.startsWith('response.'), 'Variable names cannot start with "response.". That prefix is reserved for saved responses.')
 export const variableValueSchema = z.string().max(65536)
