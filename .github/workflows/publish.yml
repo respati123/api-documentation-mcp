@@ -1,10 +1,10 @@
-name: Publish npm package
+name: Publish api-documentation-mcp
 
-# Publishes api-documentation-mcp to npm.
-# - Push to main: publishes only when the version in package.json is not on npm yet. Otherwise it does nothing.
-# - Push a tag vX.Y.Z: publishes that version. The tag must match package.json, and the version must be new.
+# Publishes api-documentation-mcp to two registries: npm, and the private Verdaccio registry at registry.respati.web.id.
+# - Push to main: publishes to each registry only when the version in package.json is not there yet. Otherwise it does nothing.
+# - Push a tag vX.Y.Z: publishes that version. The tag must match package.json, and the version must be new on at least one registry.
 # - Manually: same as a push to main.
-# Auth uses the NPM_TOKEN secret.
+# Auth uses the NPM_TOKEN secret (npm) and the VERDACCIO_TOKEN secret (Verdaccio).
 on:
   push:
     branches:
@@ -19,6 +19,9 @@ permissions:
 concurrency:
   group: publish-npm
   cancel-in-progress: false
+
+env:
+  VERDACCIO_REGISTRY: https://registry.respati.web.id/
 
 jobs:
   publish:
@@ -43,33 +46,49 @@ jobs:
             exit 1
           fi
 
-      - name: Check whether this version is already on npm
+      - name: Check whether this version is already on each registry
         id: exists
         run: |
           VERSION=$(node -p "require('./package.json').version")
           NAME=$(node -p "require('./package.json').name")
-          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
+          if npm view "$NAME@$VERSION" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "npm=true" >> "$GITHUB_OUTPUT"
             echo "$NAME@$VERSION is already on npm."
           else
-            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "npm=false" >> "$GITHUB_OUTPUT"
+          fi
+          if npm view "$NAME@$VERSION" version --registry "$VERDACCIO_REGISTRY" >/dev/null 2>&1; then
+            echo "verdaccio=true" >> "$GITHUB_OUTPUT"
+            echo "$NAME@$VERSION is already on Verdaccio."
+          else
+            echo "verdaccio=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Refuse a tag for a version that is already published
-        if: startsWith(github.ref, 'refs/tags/v') && steps.exists.outputs.published == 'true'
+      - name: Refuse a tag for a version that is already published everywhere
+        if: startsWith(github.ref, 'refs/tags/v') && steps.exists.outputs.npm == 'true' && steps.exists.outputs.verdaccio == 'true'
         run: |
-          echo "The tag names a version that is already on npm. Bump the version in package.json first."
+          echo "The tag names a version that is already on npm and Verdaccio. Bump the version in package.json first."
           exit 1
 
       - run: npm run typecheck
-        if: steps.exists.outputs.published == 'false'
+        if: steps.exists.outputs.npm == 'false' || steps.exists.outputs.verdaccio == 'false'
       - run: npm test
-        if: steps.exists.outputs.published == 'false'
+        if: steps.exists.outputs.npm == 'false' || steps.exists.outputs.verdaccio == 'false'
       - run: npm run build
-        if: steps.exists.outputs.published == 'false'
+        if: steps.exists.outputs.npm == 'false' || steps.exists.outputs.verdaccio == 'false'
 
-      - name: Publish
-        if: steps.exists.outputs.published == 'false'
+      - name: Publish to Verdaccio
+        if: steps.exists.outputs.verdaccio == 'false'
+        env:
+          VERDACCIO_TOKEN: ${{ secrets.VERDACCIO_TOKEN }}
+        run: |
+          NPMRC="$RUNNER_TEMP/verdaccio.npmrc"
+          HOST=$(echo "$VERDACCIO_REGISTRY" | sed -E 's#^https?:##')
+          printf '%s\n' "${HOST}:_authToken=${VERDACCIO_TOKEN}" > "$NPMRC"
+          npm publish --access public --registry "$VERDACCIO_REGISTRY" --userconfig "$NPMRC"
+
+      - name: Publish to npm
+        if: steps.exists.outputs.npm == 'false'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
