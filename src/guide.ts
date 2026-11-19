@@ -19,6 +19,7 @@ Read this before any change. It sets how requests, variables, folders, and docs 
 ## 2. Requests: name and order
 - Give each request a concise, human-readable name based on its business purpose. Use Title Case. Never include the HTTP method or any part of the URL or path, including path parameters, in the name. Keep the method and URL in their request fields.
 - Name reads by the resource and result: "Project List" for the collection, "Project Detail" for one project. Name writes with an action and resource: "Create Project", "Update Project", "Delete Project". For example, name "GET /projects/{projectId}" as "Project Detail", not "GET /projects/{projectId} detail".
+- For nested routes, name the resource directly affected and leave parent resources from the URL out. If the contract describes "POST /projects/{projectId}/screens" as "create screen", name it "Create Screen".
 - Use consistent terms for the same action in every folder. For example, use "Create" consistently; do not alternate between "Add" and "Create" for the same operation.
 - In a flow folder, prefix each request with its step while keeping the same naming style: "1 Create Cart", "2 Add Item", "3 Checkout". The order must match the real order of calls.
 
