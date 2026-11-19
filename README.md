@@ -25,7 +25,7 @@ codex mcp add api-documentation -- npx -y api-documentation-mcp@latest
 
 Requires Node.js 22 or newer. Start with `list_commands` to see every command and its parameters.
 
-Version 0.2.0 is not on npm yet. Until it is published, point the client at a local build: `node /path/to/mcp/dist/index.js` after `npm run build`. The `npx` form above installs the published version.
+The `npx` form above installs the latest published version. For local development, run `npm run build`, then start `node dist/index.js`.
 
 ## Use from the command line
 

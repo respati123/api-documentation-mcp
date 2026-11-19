@@ -17,9 +17,10 @@ Read this before any change. It sets how requests, variables, folders, and docs 
 - Move an existing item with a move_node change. Rename a folder with a rename_folder change. Do not delete and recreate a folder to move it, because its requests lose their place.
 
 ## 2. Requests: name and order
-- Name a request with the endpoint's name only, not its URL or its HTTP method. Use a short verb phrase in Sentence case: "Create invoice", "List invoices", "Get invoice by id", "Cancel order". The method and the URL belong in the request itself, not in its name.
-- Use the same verb for the same action in every folder: Create, List, Get, Update, Delete, Cancel. Do not write "Add" in one place and "Create" in another for the same action.
-- In a flow folder, prefix each request with its step: "1 Create cart", "2 Add item", "3 Checkout". The order must match the real order of calls.
+- Give each request a concise, human-readable name based on its business purpose. Use Title Case. Never include the HTTP method or any part of the URL or path, including path parameters, in the name. Keep the method and URL in their request fields.
+- Name reads by the resource and result: "Project List" for the collection, "Project Detail" for one project. Name writes with an action and resource: "Create Project", "Update Project", "Delete Project". For example, name "GET /projects/{projectId}" as "Project Detail", not "GET /projects/{projectId} detail".
+- Use consistent terms for the same action in every folder. For example, use "Create" consistently; do not alternate between "Add" and "Create" for the same operation.
+- In a flow folder, prefix each request with its step while keeping the same naming style: "1 Create Cart", "2 Add Item", "3 Checkout". The order must match the real order of calls.
 
 ## 3. Auth: set it for every request that needs it
 - Look at the endpoint's contract before you create the request.
